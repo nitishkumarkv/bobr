@@ -1,1 +1,1 @@
-# bobr
+# BOBR: Bayesian Optimisation of Bin boundaRies
