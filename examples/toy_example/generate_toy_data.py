@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 ########################################################################################
-# functions copied from: https://github.com/FloMau/gato/tree/master/examples/toy_example
+# functions copied from: https://github.com/FloMau/gato/tree/master/
 ########################################################################################
 
 def sample_background(n_events, lam):
@@ -35,7 +35,7 @@ def sample_signal(n_events, lam):
 def generate_toy_data(n_signal=1000, n_bkg1=1000, n_bkg2=1000, n_bkg3=1000,
                       lam_signal = 5, lam_bkg1=10, lam_bkg2=5, lam_bkg3=2, 
                       xs_signal=0.5, xs_bkg1=100, xs_bkg2=10, xs_bkg3=1,
-                      lumi=100, seed=None):
+                      lumi=100, seed=None, output_dir="./toy_data"):
     """
     Generate toy NN output data for one signal and three backgrounds.
     
@@ -78,6 +78,10 @@ def generate_toy_data(n_signal=1000, n_bkg1=1000, n_bkg2=1000, n_bkg3=1000,
         "bkg2": df_bkg2,
         "bkg3": df_bkg3
     }
+    for proc, df in data.items():
+        print(f"{proc}: {len(df)} events, NN_output min={df['NN_output'].min():.3f}, max={df['NN_output'].max():.3f}")
+        # save the dataframe
+        df.to_parquet(f"{output_dir}/{proc}.parquet")
 
     return data
 
