@@ -11,10 +11,11 @@ class BOBRBinOptimizer:
     Bayesian Optimization of Bin boundaRies (BOBR)
     Optimizes bin boundaries to maximize signal significance.
     """
-    def __init__(self, df_dict, bkg_label_lst, signal_label_lst, var_label, weight_label, n_bins=10, n_trials=10,  output_dir="./optimizer_results"):
+    def __init__(self, df_dict, bkg_label_lst, signal_label_lst, var_label, weight_label, n_bins=10, n_trials=10,
+                 output_dir="./optimizer_results", gamma_strategy="sqrt", beta=0.25):
         """
         Initialize the optimizer.
-        
+
         :param df_dict: Dictionary containing signal and background dataframes.
         :param bkg_label_lst: List of background labels.
         :param signal_label_lst: List of signal labels.
@@ -22,6 +23,8 @@ class BOBRBinOptimizer:
         :param weight_label: Column name for event weights.
         :param n_bins: Number of bins (n). The optimizer finds (n-1) bin boundaries.
         :param n_trials: Number of optimization trials.
+        :param gamma_strategy: Strategy for computing gamma ('linear' or 'sqrt').
+        :param beta: Coefficient for gamma function.
         """
         self.df_dict = df_dict
         self.bkg_label_lst = bkg_label_lst
@@ -31,12 +34,27 @@ class BOBRBinOptimizer:
         self.n_bins = n_bins
         self.n_trials = n_trials
         self.output_dir = output_dir
+        self.gamma_strategy = gamma_strategy
+        self.beta = beta
         self.study = None
         self.best_bins = None
         self.best_hist_dict = None
         self.best_Z = None
 
-    
+    def gamma_fn(self):
+        def gamma_linear(n):
+            return min(int(np.ceil(self.beta * n)), 25)
+
+        def gamma_sqrt(n):
+            return min(int(np.ceil(self.beta * np.sqrt(n))), 25)
+
+        if self.gamma_strategy == "linear":
+            return gamma_linear
+        elif self.gamma_strategy == "sqrt":
+            return gamma_sqrt
+        else:
+            raise ValueError("Unsupported gamma_strategy. Use 'linear' or 'sqrt'.")
+
     def asymptotic_significance(self, s, b):
         """Compute the asymptotic significance"""
 
@@ -60,60 +78,84 @@ class BOBRBinOptimizer:
         
         return signal_counts, background_counts
     
+#    def optimize_bins(self):
+#        """Optimize bin boundaries using Bayesian Optimization."""
+#        min_edge, max_edge = 0, 1
+#
+#        def objective(trial):
+#            bin_edges = [min_edge]
+#            for i in range(self.n_bins - 1):
+#                bin_edges.append(trial.suggest_float(f'bin_{i}', bin_edges[-1], max_edge))
+#            bin_edges.append(max_edge)
+#
+#            if not all(bin_edges[i] < bin_edges[i + 1] for i in range(len(bin_edges) - 1)):
+#                raise optuna.TrialPruned()
+#
+#            signal_hist, background_hist = self.compute_bin_counts(bin_edges)
+#            penalty = np.sum(background_hist < 10) * -1
+#            if penalty < 0:
+#                return penalty
+#            else:
+#                return self.asymptotic_significance(signal_hist, background_hist)
+#
+#        #def objective_with_penalty(trial, penalty_factor=10):
+#        #    bin_edges = [min_edge]
+#        #    penalty = 0  # Initialize penalty score
+##
+#        #    for i in range(self.n_bins - 1):
+#        #        suggested_bin = trial.suggest_float(f'bin_{i}', min_edge, max_edge)
+##
+#        #        # Check if the suggested bin is out of order
+#        #        if suggested_bin <= bin_edges[-1]:
+#        #            penalty -= penalty_factor * abs(bin_edges[-1] - suggested_bin)  # Penalize inversely to distance
+##
+#        #        bin_edges.append(suggested_bin)
+##
+#        #        bin_edges.append(max_edge)
+##
+#        #    # Compute histogram counts
+#        #    signal_hist, background_hist = self.compute_bin_counts(bin_edges)
+##
+#        #    # Apply soft penalty for bins with low background counts
+#        #    low_background_penalty = np.sum(background_hist < 10) * -1  
+##
+#        #    # Final objective value: Asymptotic significance + penalties
+#        #    return self.asymptotic_significance(signal_hist, background_hist) + penalty + low_background_penalty
+#
+#        
+#        self.study = optuna.create_study(direction='maximize')
+#        self.study.optimize(objective, n_trials=self.n_trials)
+#        self.best_bins = [min_edge] + [self.study.best_trial.params[f'bin_{i}'] for i in range(self.n_bins - 1)] + [max_edge]
+#        best_signal_counts, best_background_counts = self.compute_bin_counts(self.best_bins)
+#        self.best_hist_dict = {'signal': best_signal_counts, 'background': best_background_counts}
+#        self.best_Z = self.asymptotic_significance(best_signal_counts, best_background_counts)
+#
+#        return self.best_bins, self.best_hist_dict, self.best_Z
+    
     def optimize_bins(self):
         """Optimize bin boundaries using Bayesian Optimization."""
-        #min_edge, max_edge = np.min(self.df_dict['signal'][self.var_label].values), np.max(self.df_dict['signal'][self.var_label].values)
         min_edge, max_edge = 0, 1
-        
+
         def objective(trial):
             bin_edges = [min_edge]
             for i in range(self.n_bins - 1):
-                bin_edges.append(trial.suggest_float(f'bin_{i}', bin_edges[-1], max_edge))  # Ensure increasing order
+                bin_edges.append(trial.suggest_float(f'bin_{i}', bin_edges[-1], max_edge))
             bin_edges.append(max_edge)
 
-            # Check if bin edges are strictly increasing
             if not all(bin_edges[i] < bin_edges[i + 1] for i in range(len(bin_edges) - 1)):
-                raise optuna.TrialPruned()  # Reject this trial
-                #return sum([bin_edges[i] >= bin_edges[i + 1] for i in range(len(bin_edges) - 1)]) * -1
-            
+                raise optuna.TrialPruned()
+
             signal_hist, background_hist = self.compute_bin_counts(bin_edges)
-            #print("signal_hist: ", signal_hist)
-            #print("background_hist: ", background_hist)
-            
-            penalty = np.sum(background_hist < 10) * -1  # Soft penalty for bins with low background
+            penalty = np.sum(background_hist < 10) * -1
             if penalty < 0:
                 return penalty
             else:
                 return self.asymptotic_significance(signal_hist, background_hist)
 
-        #def objective_with_penalty(trial, penalty_factor=10):
-        #    bin_edges = [min_edge]
-        #    penalty = 0  # Initialize penalty score
-#
-        #    for i in range(self.n_bins - 1):
-        #        suggested_bin = trial.suggest_float(f'bin_{i}', min_edge, max_edge)
-#
-        #        # Check if the suggested bin is out of order
-        #        if suggested_bin <= bin_edges[-1]:
-        #            penalty -= penalty_factor * abs(bin_edges[-1] - suggested_bin)  # Penalize inversely to distance
-#
-        #        bin_edges.append(suggested_bin)
-#
-        #        bin_edges.append(max_edge)
-#
-        #    # Compute histogram counts
-        #    signal_hist, background_hist = self.compute_bin_counts(bin_edges)
-#
-        #    # Apply soft penalty for bins with low background counts
-        #    low_background_penalty = np.sum(background_hist < 10) * -1  
-#
-        #    # Final objective value: Asymptotic significance + penalties
-        #    return self.asymptotic_significance(signal_hist, background_hist) + penalty + low_background_penalty
-
-        
-        self.study = optuna.create_study(direction='maximize')
+        sampler = optuna.samplers.TPESampler(gamma=self.gamma_fn())
+        self.study = optuna.create_study(direction='maximize', sampler=sampler)
         self.study.optimize(objective, n_trials=self.n_trials)
-        
+
         self.best_bins = [min_edge] + [self.study.best_trial.params[f'bin_{i}'] for i in range(self.n_bins - 1)] + [max_edge]
         best_signal_counts, best_background_counts = self.compute_bin_counts(self.best_bins)
         self.best_hist_dict = {'signal': best_signal_counts, 'background': best_background_counts}
@@ -168,8 +210,9 @@ if __name__ == "__main__":
     
     data = {"signal": df_signal, "bkg1": df_bkg1, "bkg2": df_bkg2, "bkg3": df_bkg3}
     
-    optimizer = BOBRBinOptimizer(data, bkg_label_lst=["bkg1", "bkg2", "bkg3"], signal_label_lst=["signal"], 
-                                 var_label='score', weight_label='weight', n_bins=10, n_trials=100)
+    optimizer = BOBRBinOptimizer(data, bkg_label_lst=["bkg1", "bkg2", "bkg3"], signal_label_lst=["signal"],
+                                 var_label='score', weight_label='weight', n_bins=10, n_trials=100,
+                                 gamma_strategy="sqrt", beta=0.25)
     best_bins = optimizer.optimize_bins()
     print("Optimized bin edges:", best_bins)
     optimizer.visualize_optimization()

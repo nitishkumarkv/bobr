@@ -42,7 +42,7 @@ def main():
         toy_data = generate_toy_data(
             n_signal=100000,
             n_bkg1=200000, n_bkg2=100000, n_bkg3=100000,
-            lam_signal=6, lam_bkg1=7, lam_bkg2=7, lam_bkg3=3,
+            lam_signal=6, lam_bkg1=8, lam_bkg2=7, lam_bkg3=3,
             xs_signal=0.5,  # 500 fb = 0.5 pb
             xs_bkg1=50, xs_bkg2=15, xs_bkg3=1,
             lumi=100,  # in /fb
@@ -92,15 +92,23 @@ def main():
 
     # Run the optimizer
     print("INFO: Running the optimizer")
-    nbins_list = [5, 10, 15, 20, 25, 30]
+    #nbins_list = [3, 5, 10, 15, 20, 25, 30, 35, 40]
+    #beta_list = [0.1, 0.1, 0.1, 0.1, 0.05, 0.001, 0.001, 0.001, 0.001]
+    #n_trials_list = [200, 200, 200, 200, 300, 400, 400, 500, 500]
+    nbins_list = [30]
+    beta_list = [0.05]
+    n_trials_list = [400]
     best_Z_list = []
-    for n_bins in nbins_list:
-        if n_bins > 10:
-            n_trials = 500
-        else:
-            n_trials = 200
+    for i, n_bins in enumerate(nbins_list):
+        #if n_bins > 10:
+        #    n_trials = 400
+        #else:
+        #    n_trials = 200
+        #optimizer = BOBRBinOptimizer(toy_data, bkg_label_lst=bkg_list, signal_label_lst=signal_list,
+        #                             var_label='NN_output', weight_label='weight', n_bins=n_bins, output_dir=args.output_dir+f"/optimizer_results_nbins_{n_bins}", n_trials=n_trials)
         optimizer = BOBRBinOptimizer(toy_data, bkg_label_lst=bkg_list, signal_label_lst=signal_list,
-                                     var_label='NN_output', weight_label='weight', n_bins=n_bins, output_dir=args.output_dir+f"/optimizer_results_nbins_{n_bins}", n_trials=n_trials)
+                                 var_label='NN_output', weight_label='weight', n_bins=n_bins, output_dir=args.output_dir+f"/optimizer_results_nbins_{n_bins}", n_trials=n_trials_list[i],
+                                 gamma_strategy="linear", beta=beta_list[i])
         best_bins, best_hist_dict, best_Z = optimizer.optimize_bins()
         best_Z_list.append(best_Z)
         print("Optimized bin edges:", best_bins)
@@ -138,7 +146,7 @@ def main():
 
     # plot the significance vs n_bins
     plt.figure()
-    plt.plot(nbins_list, best_Z_list)
+    plt.plot(nbins_list, best_Z_list, marker="o")
     plt.xlabel("n_bins")
     plt.ylabel("Significance")
     plt.savefig(f"{args.output_dir}/significance_vs_nbins.pdf")
