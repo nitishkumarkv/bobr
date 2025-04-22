@@ -55,7 +55,8 @@ class BOBRBinOptimizer:
         else:
             raise ValueError("Unsupported gamma_strategy. Use 'linear' or 'sqrt'.")
 
-    def asymptotic_significance(self, s, b):
+    def asymptotic_significance_(self, s, b):
+        
         """Compute the asymptotic significance"""
 
         Z = np.sqrt(2 * ((s + b) * np.log(1 + (s / (b + 1e-10))) - s))
@@ -63,13 +64,45 @@ class BOBRBinOptimizer:
         # compute sum of Z in qudrature
         Z_sum_quad = np.sqrt(np.sum(Z**2))
         return Z_sum_quad
+    
+    def asymptotic_significance(self, s, b, eps=1e-10, ratio_threshold=0.1):
+        """
+        Compute the combined Asimov significance Z =
+          sqrt( Σ_i Z_i^2 )
+        where for each bin i:
+          Z_i = Asimov formula if (s/b)_i >= ratio_threshold,
+                Gaussian approximation if (s/b)_i < ratio_threshold.
+        """
+
+        # avoid division by zero or tiny b
+        safe_b = np.maximum(b, eps)
+
+        # per‑bin signal/background ratio
+        ratio = s / safe_b
+
+        # full Asimov significance per bin
+        Z_asimov = np.sqrt(
+            2.0 * ((s + safe_b) * np.log(1 + ratio) - s)
+        )
+
+        # Gaussian-limit approximation for small s/b
+        Z_approx = s / np.sqrt(safe_b)
+
+        # pick approximation when ratio is below threshold
+        Z_per_bin = np.where(ratio < ratio_threshold, Z_approx, Z_asimov)
+
+        # combine per‑bin Z’s in quadrature
+        Z_total = np.sqrt(np.sum(Z_per_bin**2))
+
+        return Z_total
 
     def compute_bin_counts(self, bin_edges):
         """Assign classifier scores to bins and compute signal/background counts."""
         hist_signal = Hist.new.Variable(bin_edges).Weight()
         hist_background = Hist.new.Variable(bin_edges).Weight()
 
-        hist_signal.fill(self.df_dict['signal'][self.var_label].values, weight=self.df_dict['signal'][self.weight_label].values)
+        for sig_key in self.signal_label_lst:
+            hist_signal.fill(self.df_dict[sig_key][self.var_label].values, weight=self.df_dict[sig_key][self.weight_label].values)
         for bkg_key in self.bkg_label_lst:
             hist_background.fill(self.df_dict[bkg_key][self.var_label].values, weight=self.df_dict[bkg_key][self.weight_label].values)
 
@@ -160,6 +193,19 @@ class BOBRBinOptimizer:
         best_signal_counts, best_background_counts = self.compute_bin_counts(self.best_bins)
         self.best_hist_dict = {'signal': best_signal_counts, 'background': best_background_counts}
         self.best_Z = self.asymptotic_significance(best_signal_counts, best_background_counts)
+
+        return self.best_bins, self.best_hist_dict, self.best_Z
+    
+    def equidistant_bins(self):
+        """Generate equidistant bin edges."""
+        min_edge, max_edge = 0, 1
+        bin_edges = np.linspace(min_edge, max_edge, self.n_bins + 1)
+        self.best_bins = list(bin_edges)
+        # compute significance
+        best_signal_counts, best_background_counts = self.compute_bin_counts(self.best_bins)
+        self.best_hist_dict = {'signal': best_signal_counts, 'background': best_background_counts}
+        self.best_Z = self.asymptotic_significance(best_signal_counts, best_background_counts)
+        
 
         return self.best_bins, self.best_hist_dict, self.best_Z
 
