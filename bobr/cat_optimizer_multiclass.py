@@ -11,7 +11,8 @@ import matplotlib.pyplot as plt
 from scipy.stats import multivariate_normal
 from matplotlib.patches import Ellipse, Patch
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
-
+from matplotlib.colors import ListedColormap, BoundaryNorm
+import matplotlib.tri as mtri
 
 class GMMBinOptimizer:
     """
@@ -199,6 +200,7 @@ class GMMBinOptimizer:
         D = len(trial.params[f"mu_0_0"].shape) if False else len(
             self.df_dict[self.signal_label_lst[0]][self.var_label].iloc[0]
         )
+        print(D)
         self.best_gaussians = []
         for k in range(self.n_bins):
             mu = np.array([trial.params[f"mu_{k}_{d}"] for d in range(D)])
@@ -326,12 +328,289 @@ class GMMBinOptimizer:
 
             ax.set_xlabel(f"score_{dims[0]}")
             ax.set_ylabel(f"score_{dims[1]}")
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
             #ax.set_title(f"Bins by assigned index (dims={dims})")
 
             plt.tight_layout()
             fig.savefig(Path(self.output_dir)/f'bins_2d_{dims[0]}{dims[1]}.png')
             plt.clf()
 
+
+
+    def visualize_bin_boundaries_2d(self, resolution: int = 300):
+        """
+        Plot decision regions between Gaussian bins in 2D projections.
+        Colors each grid‐cell by its assigned bin, then outlines the bin edges.
+        """
+        dims_list = [(0, 1), (0, 2), (1, 2)]
+        # build a discrete colormap for contourf
+        cmap_bins = ListedColormap([self.cmap(k) for k in range(self.n_bins)])
+
+        for dims in dims_list:
+            # grid over [0,1]×[0,1]
+            xs = np.linspace(0, 1, resolution)
+            ys = np.linspace(0, 1, resolution)
+            X, Y = np.meshgrid(xs, ys)
+            grid = np.column_stack([X.ravel(), Y.ravel()])
+
+            # compute assignment
+            logpdf = np.zeros((grid.shape[0], self.n_bins))
+            for k, g in enumerate(self.best_gaussians):
+                subm = g['mean'][list(dims)]
+                subc = g['cov'][np.ix_(dims, dims)]
+                rv = multivariate_normal(mean=subm, cov=subc, allow_singular=True)
+                logpdf[:, k] = rv.logpdf(grid)
+            assignment = np.argmax(logpdf, axis=1).reshape(X.shape)
+
+            fig, ax = plt.subplots(figsize=(8, 6))
+            # fill regions
+            cf = ax.contourf(
+                X, Y, assignment,
+                levels=np.arange(self.n_bins + 1) - 0.5,
+                cmap=cmap_bins,
+                alpha=0.4
+            )
+            # draw crisp boundaries
+            ax.contour(
+                X, Y, assignment,
+                levels=np.arange(self.n_bins + 1) - 0.5,
+                colors='k',
+                linewidths=0.5
+            )
+
+            # include a dashed line going from top left to bottom right
+            ax.plot([0, 1], [1, 0], 'k--', lw=0.5)
+
+            # legend
+            proxies = [Patch(color=self.cmap(k), label=f'Bin {k}') for k in range(self.n_bins)]
+            ax.legend(handles=proxies, ncol=2, fontsize=9, loc='upper right')
+
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+            ax.set_xlabel(f"score_{dims[0]}")
+            ax.set_ylabel(f"score_{dims[1]}")
+            ax.set_title(f"Bin boundaries")
+
+            plt.tight_layout()
+            fig.savefig(Path(self.output_dir) / f'bin_boundaries_{dims[0]}{dims[1]}.png')
+            plt.clf()
+            
+    def visualize_bin_boundaries_2d(self, resolution: int = 300):
+        """
+        Plot decision regions between Gaussian bins in 2D projections.
+        Colors each grid‐cell by its assigned bin (with a BoundaryNorm to
+        guarantee a one‐to‐one mapping), then outlines the bin edges and
+        overplots the real data for context.
+        """
+        dims_list = [(0, 1), (0, 2), (1, 2)]
+        # 1. build a discrete colormap and matching norm
+        cmap_bins = ListedColormap([self.cmap(k) for k in range(self.n_bins)])
+        bounds = np.arange(self.n_bins + 1) - 0.5   # boundaries at -0.5, 0.5, 1.5, ...
+        norm   = BoundaryNorm(bounds, cmap_bins.N)
+
+        for dims in dims_list:
+            # 2. grid over [0,1]×[0,1]
+            xs = np.linspace(0, 1, resolution)
+            ys = np.linspace(0, 1, resolution)
+            X, Y    = np.meshgrid(xs, ys)
+            grid    = np.column_stack([X.ravel(), Y.ravel()])
+
+            # 3. assign each grid‐point to the max‐pdf bin
+            logpdf = np.zeros((grid.shape[0], self.n_bins))
+            for k, g in enumerate(self.best_gaussians):
+                subm = g['mean'][list(dims)]
+                subc = g['cov'][np.ix_(dims, dims)]
+                rv   = multivariate_normal(mean=subm, cov=subc, allow_singular=True)
+                logpdf[:, k] = rv.logpdf(grid)
+            assignment = np.argmax(logpdf, axis=1).reshape(X.shape)
+
+            fig, ax = plt.subplots(figsize=(8, 6))
+            # 4. fill with discrete colors
+            cf = ax.contourf(
+                X, Y, assignment,
+                levels=bounds,
+                cmap=cmap_bins,
+                norm=norm,
+                alpha=0.3
+            )
+            # 5. draw crisp black boundaries
+            ax.contour(
+                X, Y, assignment,
+                levels=bounds,
+                colors='k',
+                linewidths=0.5
+            )
+
+            # 6. optionally overplot the real points (very low alpha)
+            for lbl, df in self.df_dict.items():
+                arr = np.vstack(df[self.var_label].to_numpy())[:, dims]
+                ax.scatter(
+                    arr[:, 0], arr[:, 1],
+                    s=3, alpha=0.05,
+                    color='k' if lbl in self.bkg_label_lst else 'r',
+                    label=None
+                )
+
+            # 7. legend
+            proxies = [Patch(color=self.cmap(k), label=f'Bin {k}') for k in range(self.n_bins)]
+            ax.legend(handles=proxies, ncol=2, fontsize=9, loc='upper right')
+
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+            ax.set_xlabel(f"score_{dims[0]}")
+            ax.set_ylabel(f"score_{dims[1]}")
+            ax.set_title(f"Bin regions & boundaries (dims={dims[0]},{dims[1]})")
+
+            plt.tight_layout()
+            fig.savefig(Path(self.output_dir) / f'bin_boundaries_{dims[0]}{dims[1]}.png')
+            plt.clf()
+
+    def visualize_bin_boundaries_simplex_pairs(self, resolution: int = 300):
+        """
+        For each pair of dims (i,j), consider the plane x_k = 1 - x_i - x_j
+        (so x_i+x_j<=1, x_k>=0).  At each grid‐point (x_i,x_j), evaluate the
+        full 3D PDF p_k(x_i,x_j,1−x_i−x_j) for each bin and color by the argmax.
+        """
+        dims_list = [(0,1), (0,2), (1,2)]
+        # discrete colormap + norm
+        colors = [self.cmap(k) for k in range(self.n_bins)]
+        cmap_bins = ListedColormap(colors)
+        bounds = np.arange(self.n_bins + 1) - 0.5
+        norm   = BoundaryNorm(bounds, cmap_bins.N)
+
+        all_dims = {0,1,2}
+        for dims in dims_list:
+            rem = (all_dims - set(dims)).pop()
+
+            # grid on dims 0..1
+            xs = np.linspace(0, 1, resolution)
+            ys = np.linspace(0, 1, resolution)
+            X, Y = np.meshgrid(xs, ys)
+            mask = (X + Y <= 1.0)
+
+            # prepare array of assignments, fill outside simplex with NaN
+            assignment = np.full(X.shape, np.nan, dtype=float)
+
+            # build full‐PDF grid‐points
+            pts = np.zeros((mask.sum(), 3))
+            pts[:, dims[0]] = X[mask]
+            pts[:, dims[1]] = Y[mask]
+            pts[:, rem]     = 1.0 - X[mask] - Y[mask]
+
+            # evaluate logpdfs
+            logps = np.zeros((pts.shape[0], self.n_bins))
+            for k, g in enumerate(self.best_gaussians):
+                rv = multivariate_normal(mean=g['mean'], cov=g['cov'], allow_singular=True)
+                logps[:, k] = rv.logpdf(pts)
+            assignment[mask] = np.argmax(logps, axis=1)
+
+            # plot
+            fig, ax = plt.subplots(figsize=(8,6))
+            cf = ax.contourf(
+                X, Y, assignment,
+                levels=bounds,
+                cmap=cmap_bins,
+                norm=norm,
+                alpha=0.6
+            )
+            ax.contour(
+                X, Y, assignment,
+                levels=bounds,
+                colors='k',
+                linewidths=0.8
+            )
+
+            ax.set_xlim(0,1)
+            ax.set_ylim(0,1)
+            ax.set_xlabel(f"score_{dims[0]}")
+            ax.set_ylabel(f"score_{dims[1]}")
+            ax.set_title(f"Bin regions (simplex slice dims={dims[0]},{dims[1]})")
+
+            plt.tight_layout()
+            fig.savefig(Path(self.output_dir)/f'bin_boundaries_{dims[0]}{dims[1]}.png')
+            plt.clf()
+
+        
+    def visualize_bin_boundaries_simplex_pairs(self, resolution: int = 300):
+        """
+        For each pair of dims (i,j), slice the simplex x_k = 1-x_i-x_j,
+        compute the full 3D Gaussian argmax at each grid pt, and plot
+        filled regions + boundaries, with bin‐color legend and numeric labels.
+        """
+        dims_list = [(0,1), (0,2), (1,2)]
+        # prepare discrete colormap & norm
+        colors = [self.cmap(k) for k in range(self.n_bins)]
+        cmap_bins = ListedColormap(colors)
+        bounds = np.arange(self.n_bins+1) - 0.5
+        norm   = BoundaryNorm(bounds, cmap_bins.N)
+
+        all_dims = {0,1,2}
+        for dims in dims_list:
+            rem = (all_dims - set(dims)).pop()
+
+            # 1) build grid on [0,1]^2 & mask simplex x_i+x_j <=1
+            xs = np.linspace(0,1,resolution)
+            ys = np.linspace(0,1,resolution)
+            X, Y = np.meshgrid(xs, ys)
+            mask = (X + Y <= 1.0)
+
+            # 2) assemble full (x,y,z) points
+            pts = np.zeros((mask.sum(), 3))
+            pts[:, dims[0]] = X[mask]
+            pts[:, dims[1]] = Y[mask]
+            pts[:, rem]     = 1.0 - X[mask] - Y[mask]
+
+            # 3) evaluate full-PDF logps and assign bins
+            logps = np.zeros((pts.shape[0], self.n_bins))
+            for k, g in enumerate(self.best_gaussians):
+                rv = multivariate_normal(mean=g['mean'], cov=g['cov'], allow_singular=True)
+                logps[:, k] = rv.logpdf(pts)
+            assign = np.full(X.shape, np.nan)
+            assign[mask] = np.argmax(logps, axis=1)
+
+            # 4) plot regions & boundaries
+            fig, ax = plt.subplots(figsize=(8,6))
+            cf = ax.contourf(
+                X, Y, assign,
+                levels=bounds,
+                cmap=cmap_bins,
+                norm=norm,
+                alpha=0.6
+            )
+            ax.contour(
+                X, Y, assign,
+                levels=bounds,
+                colors='k',
+                linewidths=0.8
+            )
+
+            # 5) numeric labels at region centroids
+            for k in range(self.n_bins):
+                xi = X[assign==k]
+                yi = Y[assign==k]
+                if xi.size:
+                    xc, yc = xi.mean(), yi.mean()
+                    ax.text(
+                        xc, yc, str(k),
+                        color=self.cmap(k),
+                        fontsize=10, fontweight='bold',
+                        ha='center', va='center'
+                    )
+
+            # 6) legend proxies
+            proxies = [Patch(color=colors[k], label=f'Bin {k}') for k in range(self.n_bins)]
+            ax.legend(handles=proxies, ncol=2, fontsize=9, loc='upper right')
+
+            ax.set_xlim(0,1)
+            ax.set_ylim(0,1)
+            ax.set_xlabel(f"score_{dims[0]}")
+            ax.set_ylabel(f"score_{dims[1]}")
+            ax.set_title(f"Bin regions (dims={dims[0]},{dims[1]})")
+
+            plt.tight_layout()
+            fig.savefig(Path(self.output_dir)/f'bin_boundaries_{dims[0]}{dims[1]}.png')
+            plt.clf()
 """    def visualize_labelled_ellipses(self):
         dims_list=[(0,1),(0,2),(1,2)]; handles_all=[]
         for dims in dims_list:

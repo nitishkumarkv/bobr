@@ -79,7 +79,7 @@ def main():
         )
 
     #num_bins_lst = [3, 5, 10, 15, 20]
-    num_bins_lst = [5]
+    num_bins_lst = [3, 5]
     z1_sum_quad_list = []
     z2_sum_quad_list = []
 
@@ -87,14 +87,26 @@ def main():
 
         bin_directory = args.output_dir + f"/n_{num_bins}"
 
-        optimizer = MixtureGMMBinOptimizer(
+        #optimizer = MixtureGMMBinOptimizer(
+        #    df_dict          = toy_data,
+        #    bkg_label_lst    = ["bkg1","bkg2","bkg3","bkg4","bkg5"],
+        #    signal_label_lst = ["signal1","signal2"],
+        #    var_label        = "NN_output",
+        #    weight_label     = "weight",
+        #    n_bins           = num_bins,
+        #    n_trials         = 100,
+        #    output_dir       = bin_directory,
+        #    combination      = "geometric",
+        #    M               = 4,
+        #)
+        optimizer = GMMBinOptimizer(
             df_dict          = toy_data,
             bkg_label_lst    = ["bkg1","bkg2","bkg3","bkg4","bkg5"],
             signal_label_lst = ["signal1","signal2"],
             var_label        = "NN_output",
             weight_label     = "weight",
             n_bins           = num_bins,
-            n_trials         = 5,
+            n_trials         = 100,
             output_dir       = bin_directory,
             combination      = "geometric",
         )
@@ -108,6 +120,7 @@ def main():
         #optimizer.assign_bins_to_data()
         optimizer.visualize_labelled_ellipses()
         optimizer.visualize_bins_2d()
+        optimizer.visualize_bin_boundaries_2d()
 
         bin_edges = [i for i in range(num_bins+1)]
 
@@ -142,6 +155,8 @@ def main():
         # save optimized gaussian parameters
         print("INFO: Saving the optimized gaussian parameters")
         print("Best gaussians:", best_gaussians)
+        print("Z1 sum quad:", optimizer.Z1_sum_quad)
+        print("Z2 sum quad:", optimizer.Z2_sum_quad)
         #with open(f"{bin_directory}/optimized_bins.json", "w") as f:
         #    to_save = {
         #        "best_gaussians": best_gaussians,
@@ -256,10 +271,10 @@ def main():
 
 
         plt.figure()
-        plt.plot(num_bins_lst, z1_sum_quad_list, marker="o", label="BOBR-Signal1")
-        plt.plot(num_bins_lst, z2_sum_quad_list, marker="o", label="BOBR-Signal2")
-        plt.plot(true_n_bins_lst_equi, z1_equ_lst, marker="o", label="Equidistant-Signal1")
-        plt.plot(true_n_bins_lst_equi, z2_equ_lst, marker="o", label="Equidistant-Signal2")
+        plt.plot(num_bins_lst, z1_sum_quad_list, marker="o", label="BOBR-Signal1", color="red")
+        plt.plot(num_bins_lst, z2_sum_quad_list, marker="o", label="BOBR-Signal2", color="blue")
+        plt.plot(true_n_bins_lst_equi, z1_equ_lst, marker="o", label="Equidistant-Signal1", color="red", linestyle="--")
+        plt.plot(true_n_bins_lst_equi, z2_equ_lst, marker="o", label="Equidistant-Signal2", color="blue", linestyle="--")
         plt.xlabel("n_bins")
         plt.ylabel("Significance")
         plt.legend()
